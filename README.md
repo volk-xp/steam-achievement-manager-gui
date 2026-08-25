@@ -307,18 +307,3 @@ that exact API. Everything version-sensitive is deliberately confined to
 | `src/gui/theme.rs` | Colours, fonts, and every egui call that changes between versions. |
 | `build.rs` | Copies Steam's runtime library next to the executable. |
 
-## Acknowledgements
-
-This is a fork of [mbwilding/steam-achievement-manager](https://github.com/mbwilding/steam-achievement-manager)
-by Matthew Wilding. The Steam integration, the fuzzy search and the achievement
-rarity bands are that project's work and are largely unchanged here. What this fork
-adds is a windowed interface in place of the original terminal one, plus automatic
-Steam library discovery.
-
-## License
-
-[MIT](LICENSE).
-
-Copyright (c) 2025 Matthew Wilding for the original work. Modifications in this
-fork are released under the same license, and the original copyright notice is
-retained as MIT requires.
