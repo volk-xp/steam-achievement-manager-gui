@@ -1,0 +1,53 @@
+[package]
+name = "sam"
+description = "Steam Achievement Manager, windowed"
+version = "3.0.0"
+# TODO: replace <your-username> with your GitHub account name.
+repository = "https://github.com/volk-xp/steam-achievement-manager-gui"
+edition = "2024"
+license-file = "LICENSE"
+readme = "README.md"
+build = "build.rs"
+
+[features]
+default = ["display-names", "global-percent"]
+
+# Reads pretty achievement titles and descriptions from Steam via
+# ISteamUserStats::GetAchievementDisplayAttribute.
+# If your steamworks version does not expose it, build with --no-default-features
+# and the list falls back to raw API names. See BUILD.md, "If the build fails".
+display-names = []
+
+# Pumps Steam callbacks after requesting global unlock percentages so the
+# numbers have arrived before we read them. Without it every achievement
+# reports 0.0% until Steam happens to answer in time.
+global-percent = []
+
+[dependencies]
+anyhow = "1.0.102"
+clap = { version = "4.6.1", features = ["derive"] }
+confy = "2.0.0"
+gag = "1.0.0"
+serde = { version = "1.0.228", features = ["derive"] }
+steamworks = "0.13.1"
+
+# Pinned deliberately. egui renamed Rounding -> CornerRadius and moved Margin to
+# integer fields in 0.31, so the UI code is written against that exact API.
+# Do not widen this to "0.32" or later without reading BUILD.md first.
+eframe = "0.31"
+
+[build-dependencies]
+glob = "0.3.3"
+
+[profile.release]
+opt-level = 2           # 2, not "z": "z" makes egui's tessellation noticeably slow.
+lto = true              # Enable Link Time Optimization.
+codegen-units = 1       # Reduce the number of codegen units to enhance optimization.
+strip = true            # Remove symbol information for a smaller binary.
+incremental = false     # Disable incremental compilation.
+overflow-checks = false # Disable overflow checks if not required (unsafe).
+# panic = "abort" was removed: the UI catches panics from the Steam worker thread
+# and shows them instead of killing the window, which needs unwinding.
+
+[profile.dev.package."*"]
+opt-level = 2

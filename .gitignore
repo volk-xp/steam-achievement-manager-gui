@@ -1,0 +1,27 @@
+# Build output. Large, machine-specific, and it contains Valve's
+# steam_api64.dll, which is covered by the Steamworks SDK agreement and does not
+# belong in source control.
+/target
+
+# The previous terminal implementation. Kept on disk for reference, not shipped.
+.backup/
+
+# Steam's redistributable libraries, wherever they end up. These come from the
+# Steamworks SDK at build time and should never be committed.
+steam_api.dll
+steam_api64.dll
+libsteam_api.so
+libsteam_api.dylib
+*.lib
+
+# Compiled application and debug symbols.
+*.exe
+*.pdb
+
+# Editor and OS clutter.
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
