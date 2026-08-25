@@ -31,7 +31,7 @@
 [Installation](#installation) · [Using it](#using-it) · [Command line](#command-line) ·
 [Where your settings live](#where-your-settings-live) · [How it works](#how-it-works) ·
 [Troubleshooting](#troubleshooting) · [Building from source](#building-from-source) ·
-[Project layout](#project-layout) · [Acknowledgements](#acknowledgements) · [License](#license)
+[Project layout](#project-layout) 
 
 ## What it is
 
