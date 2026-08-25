@@ -98,6 +98,8 @@ pub struct SamApp {
     /// Hover has to be read from the previous frame; a row paints its own
     /// background before this frame's response exists.
     warm_row: Option<usize>,
+    /// Whether removed games are being shown so one can be put back.
+    reveal_hidden: bool,
     dirty_since: Option<Instant>,
 }
 
@@ -105,12 +107,21 @@ impl SamApp {
     pub fn new(cc: &eframe::CreationContext<'_>, requested: Option<u32>) -> Self {
         theme::install(&cc.egui_ctx);
 
-        let config = config::load();
+        let mut config = config::load();
         let mut games = library::installed_games();
 
         // A game passed on the command line wins, even if no manifest for it was
-        // found, so `sam --id 367520` still works for anything you own.
-        let open = requested.or(config.last_app_id);
+        // found, so `sam --id 367520` still works for anything you own. A game
+        // the user removed from the list is not reopened on the next launch,
+        // which would put it back on screen after they asked for it to go.
+        let open = requested.or_else(|| config.last_app_id.filter(|id| !config.is_hidden(*id)));
+
+        // Naming a game on the command line is an explicit request to see it, so
+        // it goes back in the list rather than opening with no row beside it.
+        // Marked dirty straight away so the change survives more than a clean
+        // exit, since `Drop` is the only other thing that writes the config.
+        let restored = requested.is_some_and(|id| config.unhide(id));
+
         if let Some(id) = open {
             if !games.iter().any(|g| g.app_id == id) {
                 games.insert(
@@ -143,7 +154,8 @@ impl SamApp {
             notice: None,
             refused: Vec::new(),
             warm_row: None,
-            dirty_since: None,
+            reveal_hidden: false,
+            dirty_since: restored.then(Instant::now),
         }
     }
 
@@ -329,6 +341,39 @@ impl SamApp {
         self.rows.iter().filter(|r| r.pending()).count()
     }
 
+    /// How many games in the list right now are removed.
+    ///
+    /// Counted against the library rather than against `config.hidden`, because
+    /// an App ID stays in the config after its game is uninstalled. Using the
+    /// config's length would offer to reveal games that are not there.
+    fn hidden_count(&self) -> usize {
+        self.games
+            .iter()
+            .filter(|g| self.config.is_hidden(g.app_id))
+            .count()
+    }
+
+    /// Take a game out of the sidebar list, or put it back.
+    ///
+    /// The list is rebuilt from Steam's manifest files on every launch, so this
+    /// has to be remembered in the config or the game returns next time. Nothing
+    /// on disk and nothing in Steam is touched: this only decides what the
+    /// sidebar shows. A game that is currently open stays open, because removing
+    /// it from a list is not a reason to throw away pending changes.
+    fn toggle_hidden(&mut self, app_id: u32) {
+        if self.config.is_hidden(app_id) {
+            self.config.unhide(app_id);
+        } else {
+            self.config.hide(app_id);
+        }
+        // Nothing left to reveal, so drop the mode rather than leave the list
+        // in a state whose control has just disappeared.
+        if self.hidden_count() == 0 {
+            self.reveal_hidden = false;
+        }
+        self.mark_dirty();
+    }
+
     fn mark_dirty(&mut self) {
         if self.dirty_since.is_none() {
             self.dirty_since = Some(Instant::now());
@@ -358,21 +403,27 @@ impl SamApp {
     }
 
     /// Games matching the search box, best match first.
+    ///
+    /// Removed games are left out unless the sidebar is revealing them, so the
+    /// list only ever contains what the user chose to keep.
     fn visible_games(&self) -> Vec<usize> {
+        let kept: Vec<usize> = (0..self.games.len())
+            .filter(|i| self.reveal_hidden || !self.config.is_hidden(self.games[*i].app_id))
+            .collect();
+
         let needle = self.query.trim();
         if needle.is_empty() {
-            return (0..self.games.len()).collect();
+            return kept;
         }
 
         // fuzzy_score is case sensitive, so both sides are folded first.
         let needle = needle.to_lowercase();
-        let mut scored: Vec<(i64, usize)> = self
-            .games
-            .iter()
-            .enumerate()
-            .filter_map(|(i, g)| {
-                fuzzy_score(&g.name.to_lowercase(), &needle)
-                    .or_else(|| fuzzy_score(&g.app_id.to_string(), &needle))
+        let mut scored: Vec<(i64, usize)> = kept
+            .into_iter()
+            .filter_map(|i| {
+                let game = &self.games[i];
+                fuzzy_score(&game.name.to_lowercase(), &needle)
+                    .or_else(|| fuzzy_score(&game.app_id.to_string(), &needle))
                     .map(|score| (score, i))
             })
             .collect();
@@ -424,6 +475,26 @@ impl SamApp {
                 });
                 ui.add_space(6.0);
 
+                // Only worth screen space once something has actually been
+                // removed, and it is the only way back, so it is never hidden
+                // behind a menu.
+                let removed = self.hidden_count();
+                if removed > 0 {
+                    let label = format!("{removed} removed");
+                    let hint = if self.reveal_hidden {
+                        "Hide them again"
+                    } else {
+                        "Show them so you can put one back"
+                    };
+                    if widgets::chip(ui, &label, self.reveal_hidden)
+                        .on_hover_text(hint)
+                        .clicked()
+                    {
+                        self.reveal_hidden = !self.reveal_hidden;
+                    }
+                    ui.add_space(6.0);
+                }
+
                 // Reserve room for the App ID field and the status line so they
                 // stay pinned to the bottom of the column.
                 let footer = 78.0;
@@ -436,38 +507,65 @@ impl SamApp {
                     .show(ui, |ui| {
                         if visible.is_empty() {
                             ui.add_space(10.0);
-                            ui.label(
-                                RichText::new(if self.games.is_empty() {
-                                    "No installed games found. Use the App ID box below."
-                                } else {
-                                    "Nothing matches that search."
-                                })
-                                .size(12.0)
-                                .color(theme::TEXT_FAINT),
-                            );
+                            let message = if self.games.is_empty() {
+                                "No installed games found. Use the App ID box below."
+                            } else if !self.query.trim().is_empty() {
+                                "Nothing matches that search."
+                            } else {
+                                "Every game has been removed from this list."
+                            };
+                            ui.label(RichText::new(message).size(12.0).color(theme::TEXT_FAINT));
                             return;
                         }
 
                         let mut clicked: Option<u32> = None;
+                        let mut toggled: Option<u32> = None;
                         for index in visible {
                             let game = &self.games[index];
                             let app_id = game.app_id;
                             let selected = self.open == Some(app_id);
+                            let hidden = self.config.is_hidden(app_id);
                             let subtitle = self.game_subtitle(app_id, selected);
-                            if widgets::library_row(
+                            // Destructured rather than kept whole, so moving the
+                            // response into `on_hover_text` below cannot look
+                            // like a partial move of a struct still in use.
+                            let widgets::LibraryHit {
+                                response,
+                                button,
+                                on_button,
+                            } = widgets::library_row(
                                 ui,
                                 &game.name,
                                 &subtitle,
                                 theme::game_tint(app_id),
                                 selected,
-                            )
-                            .clicked()
-                            {
+                                hidden,
+                            );
+
+                            // Only tooltip the button, so scanning the list
+                            // does not trail tooltips behind the pointer.
+                            let response = if on_button {
+                                response.on_hover_text(if hidden {
+                                    "Put this game back in the list"
+                                } else {
+                                    "Remove this game from the list"
+                                })
+                            } else {
+                                response
+                            };
+
+                            if button {
+                                toggled = Some(app_id);
+                            } else if response.clicked() {
                                 clicked = Some(app_id);
                             }
                         }
+                        // Deferred: `self.games` is borrowed for the loop above.
                         if let Some(app_id) = clicked {
                             self.open_game(app_id);
+                        }
+                        if let Some(app_id) = toggled {
+                            self.toggle_hidden(app_id);
                         }
                     });
 
@@ -495,6 +593,13 @@ impl SamApp {
                                         name: format!("App {app_id}"),
                                     },
                                 );
+                            }
+                            // Asking for it by ID is an explicit request to see
+                            // it, so undo an earlier removal rather than opening
+                            // a game that is missing from the list beside it.
+                            self.config.unhide(app_id);
+                            if self.hidden_count() == 0 {
+                                self.reveal_hidden = false;
                             }
                             self.manual_id.clear();
                             self.open_game(app_id);

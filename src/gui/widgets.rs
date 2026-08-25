@@ -232,16 +232,82 @@ pub fn status_line(ui: &mut egui::Ui, colour: Color32, label: &str) {
 
 // ---------------------------------------------------------------------- rows
 
+/// What a click on a library row meant.
+///
+/// The row is a single hit area, so the small button at its right edge is found
+/// by testing where the pointer was rather than by allocating a second widget.
+/// That keeps each row's geometry written down in one place, which is the rule
+/// the rest of this file follows.
+pub struct LibraryHit {
+    pub response: Response,
+    /// The button was clicked. The row itself should not be treated as clicked.
+    pub button: bool,
+    /// The pointer is over the button right now, for tooltips and highlighting.
+    pub on_button: bool,
+}
+
+/// Draws the remove glyph (a cross) or the restore glyph (a plus).
+fn paint_row_button(painter: &egui::Painter, rect: Rect, restore: bool, warm: bool) {
+    if warm {
+        painter.rect_filled(rect, theme::R_SMALL, theme::ROW_HOVER);
+    }
+    let colour = if warm { theme::TEXT } else { theme::TEXT_FAINT };
+    let stroke = Stroke::new(1.6, colour);
+    let c = rect.center();
+    let arm = 4.5;
+    if restore {
+        painter.line_segment([Pos2::new(c.x - arm, c.y), Pos2::new(c.x + arm, c.y)], stroke);
+        painter.line_segment([Pos2::new(c.x, c.y - arm), Pos2::new(c.x, c.y + arm)], stroke);
+    } else {
+        painter.line_segment(
+            [
+                Pos2::new(c.x - arm, c.y - arm),
+                Pos2::new(c.x + arm, c.y + arm),
+            ],
+            stroke,
+        );
+        painter.line_segment(
+            [
+                Pos2::new(c.x - arm, c.y + arm),
+                Pos2::new(c.x + arm, c.y - arm),
+            ],
+            stroke,
+        );
+    }
+}
+
 /// One game in the left sidebar.
+///
+/// `hidden` games are drawn faded and offer a restore button instead of a
+/// remove button; they only appear at all while the sidebar is revealing them.
 pub fn library_row(
     ui: &mut egui::Ui,
     title: &str,
     subtitle: &str,
     tint: Color32,
     selected: bool,
-) -> Response {
+    hidden: bool,
+) -> LibraryHit {
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 52.0), Sense::click());
     hand(ui, &response);
+
+    // Both pointer reads happen before the painter is borrowed, so the two
+    // borrows of `ui` never overlap.
+    let hover_pos = ui.input(|i| i.pointer.hover_pos());
+    let click_pos = response.interact_pointer_pos();
+
+    let button_rect = Rect::from_center_size(
+        Pos2::new(rect.right() - 17.0, rect.center().y),
+        vec2(22.0, 22.0),
+    );
+    let showing_button = response.hovered();
+    let on_button = showing_button && hover_pos.is_some_and(|p| button_rect.contains(p));
+    let button = response.clicked() && click_pos.is_some_and(|p| button_rect.contains(p));
+
+    // Faded, so a revealed row reads as "not in your list" at a glance.
+    let fade = if hidden { 0.45 } else { 1.0 };
+    let tint = tint.linear_multiply(fade);
+    let title_colour = if hidden { theme::TEXT_DIM } else { theme::TEXT };
 
     let painter = ui.painter();
     if selected {
@@ -276,18 +342,25 @@ pub fn library_row(
         .to_uppercase();
     draw_centre(painter, tile, &initials, 12.5, tint.linear_multiply(0.9));
 
+    if showing_button {
+        paint_row_button(painter, button_rect, hidden, on_button);
+    }
+
     let left = tile.right() + 11.0;
-    let text_width = (rect.right() - 10.0 - left).max(20.0);
+    // The button's width is reserved whether or not it is showing, so titles do
+    // not reflow as the pointer travels down the list.
+    let right = button_rect.left() - 5.0;
+    let text_width = (right - left).max(20.0);
     let clipped = painter.with_clip_rect(Rect::from_min_max(
         Pos2::new(left, rect.top()),
-        Pos2::new(rect.right() - 8.0, rect.bottom()),
+        Pos2::new(right, rect.bottom()),
     ));
     draw_left(
         &clipped,
         Pos2::new(left, rect.top() + 8.0),
         &shorten(title, text_width, 14.0),
         14.0,
-        theme::TEXT,
+        title_colour,
     );
     draw_left(
         &clipped,
@@ -297,7 +370,11 @@ pub fn library_row(
         theme::TEXT_FAINT,
     );
 
-    response
+    LibraryHit {
+        response,
+        button,
+        on_button,
+    }
 }
 
 /// Everything one achievement row needs to draw itself.

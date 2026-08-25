@@ -38,6 +38,8 @@ pub struct CachedCounts {
 /// IMPORTANT: every scalar field must be declared before `counts`.
 /// confy writes TOML, and TOML cannot emit a plain value after an array of
 /// tables. Moving `counts` above the scalars makes saving fail silently.
+/// `hidden` is a plain array of integers rather than an array of tables, so it
+/// is safe here, but keep it above `counts` for the same reason.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Config {
     pub sort_column: SortColumn,
@@ -45,6 +47,14 @@ pub struct Config {
     pub last_app_id: Option<u32>,
     pub window_width: f32,
     pub window_height: f32,
+    /// App IDs the user removed from the library list. They stay installed and
+    /// can still be opened by App ID; this only hides them from the sidebar.
+    ///
+    /// `serde(default)` matters: without it, a sam.toml written by an earlier
+    /// build has no `hidden` key and the whole config fails to parse, silently
+    /// resetting every one of the user's settings.
+    #[serde(default)]
+    pub hidden: Vec<u32>,
     pub counts: Vec<CachedCounts>,
 }
 
@@ -58,6 +68,7 @@ impl Default for Config {
             last_app_id: None,
             window_width: 1180.0,
             window_height: 780.0,
+            hidden: Vec::new(),
             counts: Vec::new(),
         }
     }
@@ -80,6 +91,27 @@ impl Config {
                 total,
             }),
         }
+    }
+
+    pub fn is_hidden(&self, app_id: u32) -> bool {
+        self.hidden.contains(&app_id)
+    }
+
+    /// True if this changed anything, so a caller can skip an unnecessary save.
+    pub fn hide(&mut self, app_id: u32) -> bool {
+        if self.is_hidden(app_id) {
+            return false;
+        }
+        self.hidden.push(app_id);
+        true
+    }
+
+    /// True if it was hidden and no longer is. `retain` rather than a single
+    /// removal, so a config hand-edited to list the same ID twice still clears.
+    pub fn unhide(&mut self, app_id: u32) -> bool {
+        let before = self.hidden.len();
+        self.hidden.retain(|id| *id != app_id);
+        self.hidden.len() != before
     }
 }
 
