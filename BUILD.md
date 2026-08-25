@@ -91,9 +91,9 @@ Finished `release` profile [optimized] target(s) in 7m 41s
 ```
 
 You may also see `Updating crates.io index` and a note that `Cargo.lock` was
-rewritten. That is expected — the checked-in lock file still describes the old
-terminal build, and cargo replaces it on the first build of the new one. Commit
-the new `Cargo.lock` if you use git.
+written or updated. That is expected on a fresh clone. Commit the resulting
+`Cargo.lock` if you use git, so everyone building the project gets the same
+dependency versions.
 
 ### If this is the very first build and it stops with a warning about
 ### `steam_api64.dll`
@@ -114,8 +114,8 @@ You need exactly two files:
 
 | File | What it is |
 |---|---|
-| `sam.exe` | The application, around 12–18 MB |
-| `steam_api64.dll` | Steam's runtime library, around 250 KB |
+| `sam.exe` | The application, around 5 MB |
+| `steam_api64.dll` | Steam's runtime library, around 310 KB |
 
 **These two must stay in the same folder.** Copy them anywhere you like — the
 Desktop, a `C:\Tools\SAM` folder, a USB stick — as long as they travel together.
